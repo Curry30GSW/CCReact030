@@ -61,6 +61,8 @@ const ModalDetalleAsociado: React.FC<ModalDetalleAsociadoProps> = ({
             }
 
             const data = await res.json();
+            console.log(data);
+
             setDetalle(data[0] || data);
 
         } catch (error) {

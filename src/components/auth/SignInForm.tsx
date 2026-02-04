@@ -4,6 +4,7 @@ import { EyeCloseIcon, EyeIcon } from "../../icons";
 import Swal from "sweetalert2";
 import ReCAPTCHA from "react-google-recaptcha";
 import { useAuth } from "../../context/AuthContext";
+import { fetchAndBearer } from "../api/FetchAndBearer";
 
 export default function SignInForm() {
   const { login, authenticated } = useAuth();
@@ -123,7 +124,7 @@ export default function SignInForm() {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/login', {
+      const response = await fetchAndBearer('/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

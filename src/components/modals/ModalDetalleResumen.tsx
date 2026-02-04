@@ -244,10 +244,10 @@ const ModalDetalleAsociado: React.FC<ModalDetalleResumenProps> = ({
                                                         CÉDULA
                                                     </TableCell>
                                                     <TableCell isHeader className="px-4 py-3 text-sm font-medium text-center text-dark dark:text-white/90">
-                                                        NOMBRE
+                                                        CUENTA
                                                     </TableCell>
                                                     <TableCell isHeader className="px-4 py-3 text-sm font-medium text-center text-dark dark:text-white/90">
-                                                        CUENTA
+                                                        NOMBRE
                                                     </TableCell>
                                                     <TableCell isHeader className="px-4 py-3 text-sm font-medium text-center text-dark dark:text-white/90">
                                                         NÓMINA

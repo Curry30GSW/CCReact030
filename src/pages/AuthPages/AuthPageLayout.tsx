@@ -1,4 +1,5 @@
 import React from "react";
+import backgroundImage from '/images/logo/F2.jpg';
 
 export default function AuthLayout({
   children,
@@ -9,7 +10,7 @@ export default function AuthLayout({
     <div className="relative min-h-screen">
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
-        style={{ backgroundImage: "url('/images/logo/F2.jpg')" }}
+        style={{ backgroundImage: `url('${backgroundImage}')` }}
       >
         <div className="absolute inset-0 bg-black/40 backdrop-blur-xs"></div>
       </div>

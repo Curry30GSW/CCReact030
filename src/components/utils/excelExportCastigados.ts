@@ -14,8 +14,8 @@ export interface ExcelExportItem {
     fecha: string;
     agenciaCodigo?: number;
     depe93?: number;
+    CREDITOS_AGRUPADOS?: string;
 }
-
 
 // Función para determinar zona jurídica
 export const determinarZonaJuridica = (agencia: number) => {
@@ -29,7 +29,7 @@ export const determinarZonaJuridica = (agencia: number) => {
     if (zonas.centro.includes(agenciaNum)) return '21 - JURIDICO ZONA CENTRO';
     if (zonas.norte.includes(agenciaNum)) return '22 - JURIDICO ZONA NORTE';
     if (zonas.sur.includes(agenciaNum)) return '23 - JURIDICO ZONA SUR';
-        return 'No determinada';
+    return 'No determinada';
 };
 
 const obtenerNombreRecaudacion = (codigo: string): string => {
@@ -46,7 +46,6 @@ const obtenerNombreRecaudacion = (codigo: string): string => {
     return filtros[codigo] || codigo;
 };
 
-
 const formatearFechaCorte = (fecha: Date): string => {
     const meses = [
         'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -60,6 +59,7 @@ const formatearFechaCorte = (fecha: Date): string => {
     return `${dia} de ${mes} de ${año}`;
 };
 
+// ¡MANTENIENDO ESTA FUNCIÓN IMPORTANTE!
 const determinarCategoriaRecaudacion = (depe93: number): string => {
     switch (depe93) {
         case 59:
@@ -90,6 +90,145 @@ const determinarCategoriaRecaudacion = (depe93: number): string => {
     }
 };
 
+// Función para extraer información de créditos (modificada para manejar múltiples créditos)
+const extraerInformacionCreditos = (creditosAgrupados?: string) => {
+    // Manejar null, undefined o string vacío
+    if (!creditosAgrupados || creditosAgrupados === 'null' || creditosAgrupados.trim() === '') {
+        return { pagare: '', credito: '', garantia: '' };
+    }
+
+    try {
+        const textoLimpio = creditosAgrupados.trim();
+        
+        // Dividir por '#' si hay múltiples créditos
+        const creditos = textoLimpio.split('#').filter(c => c.trim() !== '');
+        
+        const pagares: string[] = [];
+        const creditosInfo: string[] = [];
+        const garantias: string[] = [];
+
+        // Procesar TODOS los créditos
+        creditos.forEach(credito => {
+            let pagare = '';
+            let creditoInfo = '';
+            let garantia = '';
+
+            const campos = credito.split('|');
+            
+            campos.forEach(campo => {
+                const partes = campo.split(':');
+                
+                if (partes.length >= 2) {
+                    const key = partes[0].trim();
+                    const value = partes.slice(1).join(':').trim();
+                    
+                    switch(key) {
+                        case 'CREDITO':
+                            pagare = value;
+                            break;
+                        case 'TCRE':
+                            const tipoCredito = value;
+                            // Buscar DESC06
+                            const desc06Campo = campos.find(c => c.startsWith('DESC06:'));
+                            
+                            if (desc06Campo) {
+                                const desc06Partes = desc06Campo.split(':');
+                                const desc06 = desc06Partes.length >= 2 ? 
+                                    desc06Partes.slice(1).join(':').trim() : '';
+                                creditoInfo = `${tipoCredito} - ${desc06}`;
+                            } else {
+                                creditoInfo = tipoCredito;
+                            }
+                            break;
+                        case 'DESC15':
+                            garantia = value;
+                            break;
+                    }
+                }
+            });
+
+            if (pagare) pagares.push(pagare);
+            if (creditoInfo) creditosInfo.push(creditoInfo);
+            if (garantia) garantias.push(garantia);
+        });
+
+        // Unir múltiples valores con separadores
+        return { 
+            pagare: pagares.join(', '),      // Ej: "2979, 2980, 2981"
+            credito: creditosInfo.join('; '), // Ej: "79 - PLUS NUEVOS ASOCIADOS; 80 - PLUS LIBRE DESTINACIÓN"
+            garantia: garantias.join(', ')    // Ej: "FONDO DE GARANTIA, FIANZA SOLIDARIA"
+        };
+        
+    } catch (error) {
+        return { pagare: '', credito: '', garantia: '' };
+    }
+};
+
+// Función para extraer TODOS los créditos para el resumen (ya la teníamos)
+const extraerTodosCreditos = (creditosAgrupados?: string) => {
+    const creditosExtraidos: Array<{pagare: string, credito: string, garantia: string}> = [];
+    
+    // Manejar null, undefined o string vacío
+    if (!creditosAgrupados || creditosAgrupados === 'null' || creditosAgrupados.trim() === '') {
+        return creditosExtraidos;
+    }
+
+    try {
+        const textoLimpio = creditosAgrupados.trim();
+        
+        // Dividir por '#' si hay múltiples créditos
+        const creditos = textoLimpio.split('#').filter(c => c.trim() !== '');
+        
+        creditos.forEach(credito => {
+            let pagare = '';
+            let creditoInfo = '';
+            let garantia = '';
+
+            const campos = credito.split('|');
+            
+            campos.forEach(campo => {
+                const partes = campo.split(':');
+                
+                if (partes.length >= 2) {
+                    const key = partes[0].trim();
+                    const value = partes.slice(1).join(':').trim();
+                    
+                    switch(key) {
+                        case 'CREDITO':
+                            pagare = value;
+                            break;
+                        case 'TCRE':
+                            const tipoCredito = value;
+                            // Buscar DESC06
+                            const desc06Campo = campos.find(c => c.startsWith('DESC06:'));
+                            
+                            if (desc06Campo) {
+                                const desc06Partes = desc06Campo.split(':');
+                                const desc06 = desc06Partes.length >= 2 ? 
+                                    desc06Partes.slice(1).join(':').trim() : '';
+                                creditoInfo = `${tipoCredito} - ${desc06}`;
+                            } else {
+                                creditoInfo = tipoCredito;
+                            }
+                            break;
+                        case 'DESC15':
+                            garantia = value;
+                            break;
+                    }
+                }
+            });
+
+            if (creditoInfo) {
+                creditosExtraidos.push({ pagare, credito: creditoInfo, garantia });
+            }
+        });
+        
+    } catch (error) {
+        // En caso de error, retornar array vacío
+    }
+    
+    return creditosExtraidos;
+};
 
 export const exportarAExcel = async (
     datos: ExcelExportItem[], 
@@ -98,6 +237,9 @@ export const exportarAExcel = async (
     aniosSeleccionados?: string[]
 ) => {
     try {
+        const creditosParaResumen: Array<{tipoCredito: string, valor: number}> = [];
+
+        
         // 1. Primero, asegurarnos que cada dato tenga la zona jurídica correcta
         const datosConZonaJuridica = datos.map(item => {
             // Extraer el código de agencia del string "48 - BOSA"
@@ -134,16 +276,16 @@ export const exportarAExcel = async (
         }).replace(/\//g, '_');
 
         // --- FILA 1: TITULO
-          worksheet.mergeCells('A1:J1');
+        // CAMBIADO A 13 COLUMNAS (10 originales + 3 nuevas)
+        worksheet.mergeCells('A1:M1');
         const titleCell = worksheet.getCell('A1');
         const fechaCorte = formatearFechaCorte(now);
         titleCell.value = `Asociados Castigados Corte ${fechaCorte}`;
         titleCell.font = { bold: true, size: 14 };
         titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-
         // --- FILA 2: FECHA
-        worksheet.mergeCells('A2:J2');
+        worksheet.mergeCells('A2:M2');
         const dateCell = worksheet.getCell('A2');
         const opcionesFecha = { 
             weekday: 'long', 
@@ -176,7 +318,7 @@ export const exportarAExcel = async (
             
             textoFiltros += filtros.join(' | ');
             
-            worksheet.mergeCells(`A${filaFiltros}:J${filaFiltros}`);
+            worksheet.mergeCells(`A${filaFiltros}:M${filaFiltros}`);
             const filtrosCell = worksheet.getCell(`A${filaFiltros}`);
             filtrosCell.value = textoFiltros;
             filtrosCell.font = { italic: true, size: 10, color: { argb: 'FF666666' } };
@@ -184,9 +326,9 @@ export const exportarAExcel = async (
             filaFiltros++;
         }
 
-
         worksheet.addRow([]);
 
+        // HEADERS CON LAS 3 NUEVAS COLUMNAS
         const headers = [
             'Agencia',
             'Recaudación',
@@ -196,15 +338,18 @@ export const exportarAExcel = async (
             'Cuenta',
             'Nomina',
             'Score',
-            'Valor Castigado',
-            'Fecha Castigo'
+            'Pagaré',        // NUEVA COLUMNA (I)
+            'Crédito',       // NUEVA COLUMNA (J)
+            'Garantía',      // NUEVA COLUMNA (K)
+            'Valor Castigado',  // (L)
+            'Fecha Castigo'     // (M)
         ];
 
         const headerRow = worksheet.addRow(headers);
         headerRow.font = { bold: true };
         headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
-        // Configurar anchos de columna
+        // Configurar anchos de columna (13 columnas ahora)
         worksheet.columns = [
             { key: 'agencia', width: 30 },
             { key: 'recaudacion', width: 25 },
@@ -214,6 +359,9 @@ export const exportarAExcel = async (
             { key: 'numeroCuenta', width: 18 },
             { key: 'nombre', width: 32 },
             { key: 'score', width: 10 },
+            { key: 'pagare', width: 12 },      // NUEVA COLUMNA
+            { key: 'credito', width: 25 },     // NUEVA COLUMNA
+            { key: 'garantia', width: 20 },    // NUEVA COLUMNA
             { key: 'valor', width: 18 },
             { key: 'fecha', width: 16 }
         ];
@@ -221,6 +369,21 @@ export const exportarAExcel = async (
         // Agregar los datos
         datosOrdenados.forEach(item => {
             const valorNum = Number(item.valor) || 0;
+            
+            // Extraer información de créditos
+            const infoCreditos = extraerInformacionCreditos(item.CREDITOS_AGRUPADOS);
+
+            const todosCreditos = extraerTodosCreditos(item.CREDITOS_AGRUPADOS);
+
+            todosCreditos.forEach(credito => {
+                if (credito.credito) {
+                    creditosParaResumen.push({
+                        tipoCredito: credito.credito,
+                        valor: valorNum / Math.max(todosCreditos.length, 1) // Dividir el valor entre los créditos
+                    });
+                }
+            });
+            
             worksheet.addRow({
                 agencia: item.agencia,
                 recaudacion: item.recaudacion,
@@ -230,26 +393,30 @@ export const exportarAExcel = async (
                 numeroCuenta: item.numeroCuenta,
                 nombre: item.nombre,
                 score: item.score || '',
+                pagare: infoCreditos.pagare,      // NUEVA COLUMNA
+                credito: infoCreditos.credito,    // NUEVA COLUMNA
+                garantia: infoCreditos.garantia,  // NUEVA COLUMNA
                 valor: valorNum,
                 fecha: item.fecha
             });
         });
 
-        // Formatear columna I (valor) como moneda
+        // Formatear columnas
         const firstDataRow = headerRow.number + 1;
         const lastDataRow = firstDataRow + datosOrdenados.length - 1;
         
         for (let r = firstDataRow; r <= lastDataRow; r++) {
-            // Formato moneda para columna I (índice 9)
-            worksheet.getCell(`I${r}`).numFmt = '"$"#,##0';
-            worksheet.getCell(`I${r}`).alignment = { horizontal: 'right', vertical: 'middle' };
+            // Formato moneda para columna L (Valor Castigado) - columna 12
+            worksheet.getCell(`L${r}`).numFmt = '"$"#,##0';
+            worksheet.getCell(`L${r}`).alignment = { horizontal: 'right', vertical: 'middle' };
 
-            // Centrar columnas F (numeroCuenta) y H (score)
+            // Centrar columnas
             worksheet.getCell(`F${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
             worksheet.getCell(`H${r}`).alignment = { horizontal: 'center', vertical: 'middle' };
+            worksheet.getCell(`I${r}`).alignment = { horizontal: 'center', vertical: 'middle' }; // Pagaré
         }
 
-      // Calcular total y añadir fila vacía + total
+        // Calcular total y añadir fila vacía + total
         const totalValor = datosOrdenados.reduce(
             (acc, it) => acc + (Number(it.valor) || 0),
             0
@@ -265,8 +432,8 @@ export const exportarAExcel = async (
         const totalRowNumber = totalRow.number;
         const fondoTotal = 'FFFABF8F';
 
-        // Estilo para TODA la fila del total (10 columnas)
-        for (let col = 1; col <= 10; col++) {
+        // Estilo para TODA la fila del total (13 columnas)
+        for (let col = 1; col <= 13; col++) {
             const cell = worksheet.getCell(totalRowNumber, col);
 
             cell.fill = { 
@@ -281,8 +448,7 @@ export const exportarAExcel = async (
                 // Columna "TOTAL"
                 cell.alignment = { horizontal: 'left', vertical: 'middle' };
             } 
-            else if (col === 9) {
-                // Columna Valor Castigado (I)
+            else if (col === 12) { // Columna L (Valor Castigado)
                 cell.numFmt = '"$"#,##0';
                 cell.alignment = { horizontal: 'right', vertical: 'middle' };
             } 
@@ -290,7 +456,6 @@ export const exportarAExcel = async (
                 cell.alignment = { horizontal: 'center', vertical: 'middle' };
             }
         }
-
 
         // --- RESUMEN POR AGENCIA ---
         const filaInicioResumen = totalRowNumber + 2;
@@ -396,7 +561,6 @@ export const exportarAExcel = async (
         totalResumenRow.getCell(3).numFmt = '"$"#,##0';
 
         // --- RESUMEN POR ZONA JURÍDICA (al lado del resumen de agencias) ---
-        // Posición: misma fila del encabezado pero columna 5
         const filaInicioZonas = filaInicioResumen;
         let currentRowZonas = filaInicioZonas;
 
@@ -538,12 +702,11 @@ export const exportarAExcel = async (
         worksheet.getRow(1).height = 24;
         worksheet.getRow(2).height = 20;
 
-
         // --- RESUMEN POR TIPO DE RECAUDACIÓN (debajo del resumen de zonas) ---
         const filaInicioRecaudacion = Math.max(currentRowZonas) + 2;
         let currentRowRecaudacion = filaInicioRecaudacion;
 
-        // Agrupar por tipo de recaudación
+        // Agrupar por tipo de recaudación (USANDO determinarCategoriaRecaudacion)
         const resumenRecaudacion: Record<string, { cantidad: number; suma: number }> = {};
 
         datosOrdenados.forEach(item => {
@@ -681,6 +844,133 @@ export const exportarAExcel = async (
         }
         totalRecaudacionRow.getCell(colInicioRecaudacion + 2).numFmt = '"$"#,##0';
 
+    const filaInicioTipoCredito = currentRowRecaudacion + 2;
+        let currentRowTipoCredito = filaInicioTipoCredito;
+        const colInicioTipoCredito = 5;
+
+        // Título del resumen por tipo de crédito
+        worksheet.mergeCells(
+            `${String.fromCharCode(64 + colInicioTipoCredito)}${currentRowTipoCredito}:` +
+            `${String.fromCharCode(64 + colInicioTipoCredito + 2)}${currentRowTipoCredito}`
+        );
+        const tipoCreditoTitleCell = worksheet.getCell(
+            `${String.fromCharCode(64 + colInicioTipoCredito)}${currentRowTipoCredito}`
+        );
+        tipoCreditoTitleCell.value = 'RESUMEN POR TIPO DE CRÉDITO';
+        tipoCreditoTitleCell.font = { bold: true, size: 12 };
+        tipoCreditoTitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        tipoCreditoTitleCell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE6F3FF' }
+        };
+
+        currentRowTipoCredito++;
+
+        // Encabezado de la tabla de tipo de crédito
+        const tipoCreditoHeader = worksheet.getRow(currentRowTipoCredito);
+        tipoCreditoHeader.getCell(colInicioTipoCredito).value = 'Tipo de Crédito';
+        tipoCreditoHeader.getCell(colInicioTipoCredito + 1).value = 'Cuentas';
+        tipoCreditoHeader.getCell(colInicioTipoCredito + 2).value = 'Valor Total';
+
+        // Estilos del encabezado
+        const headerTipoCreditoBg = 'FF305496';
+        for (let col = colInicioTipoCredito; col <= colInicioTipoCredito + 2; col++) {
+            const cell = tipoCreditoHeader.getCell(col);
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.fill = { 
+                type: 'pattern', 
+                pattern: 'solid', 
+                fgColor: { argb: headerTipoCreditoBg } 
+            };
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FF000000' } },
+                left: { style: 'thin', color: { argb: 'FF000000' } },
+                bottom: { style: 'thin', color: { argb: 'FF000000' } },
+                right: { style: 'thin', color: { argb: 'FF000000' } }
+            };
+        }
+
+        currentRowTipoCredito++;
+
+        // Agrupar y sumar los créditos
+        const resumenTipoCredito: Record<string, { cantidad: number; suma: number }> = {};
+        
+        // Usar la variable creditosParaResumen que ya hemos llenado
+        creditosParaResumen.forEach(credito => {
+            const key = credito.tipoCredito;
+            if (!resumenTipoCredito[key]) {
+                resumenTipoCredito[key] = { cantidad: 0, suma: 0 };
+            }
+            resumenTipoCredito[key].cantidad += 1;
+            resumenTipoCredito[key].suma += credito.valor;
+        });
+
+        // Ordenar por valor descendente
+        const tiposOrdenados = Object.entries(resumenTipoCredito)
+            .sort(([, a], [, b]) => b.cantidad - a.cantidad);
+
+        // Filas de datos de tipo de crédito
+        tiposOrdenados.forEach(([tipoCredito, data]) => {
+            const row = worksheet.getRow(currentRowTipoCredito);
+            
+            row.getCell(colInicioTipoCredito).value = tipoCredito;
+            row.getCell(colInicioTipoCredito + 1).value = data.cantidad;
+            row.getCell(colInicioTipoCredito + 2).value = data.suma;
+
+            // Estilos
+            row.getCell(colInicioTipoCredito).alignment = { horizontal: 'left', vertical: 'middle' };
+            row.getCell(colInicioTipoCredito + 1).alignment = { horizontal: 'center', vertical: 'middle' };
+            row.getCell(colInicioTipoCredito + 2).numFmt = '"$"#,##0';
+            row.getCell(colInicioTipoCredito + 2).alignment = { horizontal: 'right', vertical: 'middle' };
+
+            // Bordes
+            for (let col = colInicioTipoCredito; col <= colInicioTipoCredito + 2; col++) {
+                row.getCell(col).border = {
+                    top: { style: 'thin', color: { argb: 'FF000000' } },
+                    left: { style: 'thin', color: { argb: 'FF000000' } },
+                    bottom: { style: 'thin', color: { argb: 'FF000000' } },
+                    right: { style: 'thin', color: { argb: 'FF000000' } }
+                };
+            }
+
+            currentRowTipoCredito++;
+        });
+
+        // Fila TOTAL del resumen de tipo de crédito
+        const totalTipoCreditoRow = worksheet.getRow(currentRowTipoCredito);
+        const totalCuentasTipoCredito = tiposOrdenados.reduce((sum, [, item]) => sum + item.cantidad, 0);
+        const totalSumaTipoCredito = tiposOrdenados.reduce((sum, [, item]) => sum + item.suma, 0);
+
+        totalTipoCreditoRow.getCell(colInicioTipoCredito).value = 'TOTAL';
+        totalTipoCreditoRow.getCell(colInicioTipoCredito + 1).value = totalCuentasTipoCredito;
+        totalTipoCreditoRow.getCell(colInicioTipoCredito + 2).value = totalSumaTipoCredito;
+
+        const fondoTotalTipoCredito = 'FFFABF8F';
+
+        // Estilos para TOTAL del resumen de tipo de crédito
+        for (let col = colInicioTipoCredito; col <= colInicioTipoCredito + 2; col++) {
+            const cell = totalTipoCreditoRow.getCell(col);
+            cell.font = { bold: true, color: { argb: 'FF000000' } };
+            cell.fill = { 
+                type: 'pattern', 
+                pattern: 'solid', 
+                fgColor: { argb: fondoTotalTipoCredito } 
+            };
+            cell.alignment = { 
+                horizontal: col === colInicioTipoCredito ? 'left' : 
+                        (col === colInicioTipoCredito + 1 ? 'center' : 'right'), 
+                vertical: 'middle' 
+            };
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FF000000' } },
+                left: { style: 'thin', color: { argb: 'FF000000' } },
+                bottom: { style: 'thin', color: { argb: 'FF000000' } },
+                right: { style: 'thin', color: { argb: 'FF000000' } }
+            };
+        }
+        totalTipoCreditoRow.getCell(colInicioTipoCredito + 2).numFmt = '"$"#,##0';
 
         // Descargar archivo
         const buffer = await workbook.xlsx.writeBuffer();

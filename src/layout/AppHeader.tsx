@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { useSidebar } from "../context/SidebarContext";
 import { ThemeToggleButton } from "../components/common/ThemeToggleButton";
 import UserDropdown from "../components/header/UserDropdown";
+import coopserpLogo from '/images/logo/coopserp.png';
 
 const AppHeader: React.FC = () => {
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
@@ -85,12 +86,12 @@ const AppHeader: React.FC = () => {
           <Link to="/" className="lg:hidden">
             <img
               className="dark:hidden"
-              src="./images/logo/coopserp.png"
+              src={coopserpLogo}
               alt="Logo"
             />
             <img
               className="hidden dark:block"
-              src="./images/logo/coopserp.png"
+              src={coopserpLogo}
               alt="Logo"
             />
           </Link>

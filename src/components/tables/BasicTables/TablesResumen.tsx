@@ -12,8 +12,18 @@ import FiltrosResumen from '../../filtros/FiltrosResumen';
 import { CastigoAsociado, AnioFiltro, FiltrosResumenState } from '../../../types/resumen';
 import ModalDetalleResumen from '../../modals/ModalDetalleResumen';
 import { handleExportarExcel, FiltrosExport } from '../../utils/excelExportResumenCount';
+import { Castigado } from '../../../types/castigados';
+import { motion, AnimatePresence } from 'framer-motion';
+
 
 const ITEMS_PER_PAGE = 7; // Valor inicial
+
+const fadeSlide = {
+    initial: { opacity: 0, y: 20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 }
+};
+
 
 const TablaResumenCastigos: React.FC = () => {
     const [asociados, setAsociados] = useState<CastigoAsociado[]>([]);
@@ -34,6 +44,16 @@ const TablaResumenCastigos: React.FC = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(ITEMS_PER_PAGE);
 
+    const [mostrarResumenes, setMostrarResumenes] = useState(false);
+    const [resumenRecaudacion, setResumenRecaudacion] = useState<Array<{ tipo: string, cantidad: number, suma: number }>>([]);
+    const [resumenTipoCredito, setResumenTipoCredito] = useState<Array<{ tipo: string, cantidad: number, suma: number }>>([]);
+
+    const [resumenRecaudacionPage, setResumenRecaudacionPage] = useState(1);
+    const [resumenRecaudacionPerPage, setResumenRecaudacionPerPage] = useState(7);
+    const [resumenTipoCreditoPage, setResumenTipoCreditoPage] = useState(1);
+    const [resumenTipoCreditoPerPage, setResumenTipoCreditoPerPage] = useState(7);
+
+
     // Obtener años de filtro solo una vez
     useEffect(() => {
         obtenerAniosFiltro();
@@ -43,6 +63,217 @@ const TablaResumenCastigos: React.FC = () => {
     useEffect(() => {
         obtenerAsociados();
     }, [filtros]);
+
+
+    // En tu componente, agrega estas funciones (iguales a las del Excel)
+    const determinarCategoriaRecaudacion = (depe93: number): string => {
+        switch (depe93) {
+            case 59: return 'Ley Insolvencia';
+            case 0: return 'CC - Irrecuperable';
+            case 46: return 'Saldo menor a Salario Mínimo';
+            case 51:
+            case 52:
+            case 53:
+            case 54: return 'Sin Medida Cautelar';
+            case 55: return 'CC - Ejecutivo con Descuento';
+            case 66: return 'CC - Problema';
+            case 72: return 'CC - Embargo Bien Mueble/Inmueble';
+            case 73: return 'CC - Embargo Bien Secuestrado';
+            case 74: return 'CC - Remate';
+            case 99: return 'CC - Sin Amnistía';
+            default: return 'Otros';
+        }
+    };
+
+    const extraerTodosCreditos = (creditosAgrupados?: string | null) => {
+        const creditosExtraidos: Array<{ credito: string, valor: number }> = [];
+
+        if (!creditosAgrupados || creditosAgrupados === 'null' || creditosAgrupados.trim() === '') {
+            return creditosExtraidos;
+        }
+
+        try {
+            const textoLimpio = creditosAgrupados.trim();
+
+            // Si el texto contiene '#', separamos por ese carácter
+            const creditos = textoLimpio.split('#').filter(c => {
+                const creditoLimpio = c.trim();
+                return creditoLimpio !== '' && creditoLimpio.startsWith('CREDITO:');
+            });
+
+
+            creditos.forEach(credito => {
+                let creditoInfo = '';
+
+                // Buscar TCRE (Tipo de crédito)
+                const tcreMatch = credito.match(/\|TCRE:([^|]+)/);
+                const desc06Match = credito.match(/\|DESC06:([^|]+)/);
+
+                if (tcreMatch) {
+                    const tipoCredito = tcreMatch[1].trim();
+                    const descripcion = desc06Match ? desc06Match[1].trim() : '';
+
+                    creditoInfo = descripcion ? `${tipoCredito} - ${descripcion}` : tipoCredito;
+
+                    // Solo agregar si no está vacío y no es duplicado en este mismo registro
+                    if (creditoInfo && !creditosExtraidos.some(c => c.credito === creditoInfo)) {
+                        creditosExtraidos.push({ credito: creditoInfo, valor: 0 });
+                    }
+                }
+            });
+
+        } catch (error) {
+            console.error('Error al extraer créditos:', error);
+        }
+
+        return creditosExtraidos;
+    };
+
+    // Función para calcular los resúmenes (IDÉNTICA a la del Excel)
+    const calcularResumenes = (datos: Castigado[]) => {
+        // Resumen por tipo de recaudación
+        const recaudacionMap: Record<string, { cantidad: number; suma: number }> = {};
+        const tipoCreditoMap: Record<string, { cantidad: number; suma: number }> = {};
+
+        datos.forEach(item => {
+            const valor = (item.ESCR93 || 0) + (item.ORCR93 || 0);
+
+
+            // 1. Resumen por tipo de recaudación
+            const categoriaRecaudacion = determinarCategoriaRecaudacion(item.DEPE93);
+            if (!recaudacionMap[categoriaRecaudacion]) {
+                recaudacionMap[categoriaRecaudacion] = { cantidad: 0, suma: 0 };
+            }
+            recaudacionMap[categoriaRecaudacion].cantidad += 1;
+            recaudacionMap[categoriaRecaudacion].suma += valor;
+
+            // 2. Resumen por tipo de crédito
+            const creditos = extraerTodosCreditos(item.CREDITOS_AGRUPADOS);
+            const valorPorCredito = creditos.length > 0 ? valor / creditos.length : valor;
+
+
+            creditos.forEach(credito => {
+                if (!tipoCreditoMap[credito.credito]) {
+                    tipoCreditoMap[credito.credito] = { cantidad: 0, suma: 0 };
+                }
+                tipoCreditoMap[credito.credito].cantidad += 1;
+                tipoCreditoMap[credito.credito].suma += valorPorCredito;
+            });
+
+            // Si no hay créditos específicos, contar como "Sin crédito especificado"
+            if (creditos.length === 0) {
+                const tipo = 'Sin crédito especificado';
+                if (!tipoCreditoMap[tipo]) {
+                    tipoCreditoMap[tipo] = { cantidad: 0, suma: 0 };
+                }
+                tipoCreditoMap[tipo].cantidad += 1;
+                tipoCreditoMap[tipo].suma += valor;
+            }
+        });
+
+        // Ordenar categorías para recaudación (mismo orden que en Excel)
+        const categoriasOrdenadas = [
+            'Ley Insolvencia',
+            'Saldo menor a Salario Mínimo',
+            'Sin Medida Cautelar',
+            'CC - Problema',
+            'CC - Embargo Bien Mueble/Inmueble',
+            'CC - Embargo Bien Secuestrado',
+            'CC - Remate',
+            'CC - Sin Amnistía',
+            'CC - Irrecuperable',
+            'CC - Ejecutivo con Descuento',
+            'Otros'
+        ];
+
+        const resumenRecaudacionArray = categoriasOrdenadas
+            .filter(categoria => recaudacionMap[categoria])
+            .map(categoria => ({
+                tipo: categoria,
+                cantidad: recaudacionMap[categoria].cantidad,
+                suma: recaudacionMap[categoria].suma
+            }));
+
+        // Ordenar tipos de crédito por cantidad (descendente) como en Excel
+        const resumenTipoCreditoArray = Object.entries(tipoCreditoMap)
+            .map(([tipo, data]) => ({
+                tipo,
+                cantidad: data.cantidad,
+                suma: data.suma
+            }))
+            .sort((a, b) => b.cantidad - a.cantidad);
+
+        return { resumenRecaudacionArray, resumenTipoCreditoArray };
+    };
+
+    // Función para manejar el clic en "Ver Más"
+    const handleVerMasClick = async () => {
+        try {
+            // Necesitas obtener los datos detallados de castigados
+            setLoading(true);
+
+            // Construir URL para obtener los datos detallados
+            let url = '/api/castigados?page=1&pageSize=2500'; // Ajusta esta ruta según tu API
+            const params = new URLSearchParams();
+
+            // Pasar los mismos filtros que usas en obtenerAsociados
+            if (filtros.filtroRecaudacion) {
+                params.append('filtroRecaudacion', filtros.filtroRecaudacion);
+            }
+
+            if (filtros.aniosSeleccionados.length > 0) {
+                params.append('anios', filtros.aniosSeleccionados.join(','));
+            }
+
+            const queryString = params.toString();
+            if (queryString) {
+                url += `?${queryString}`;
+            }
+
+            const res = await fetchAndBearer(url);
+
+            if (res.status === 401 || res.status === 403) {
+                sessionStorage.clear();
+                window.location.href = '/auth';
+                return;
+            }
+
+            if (!res.ok) throw new Error('Error al obtener datos detallados');
+
+            const respuesta = await res.json();
+            const datosDetallados: Castigado[] = respuesta.data || respuesta;
+
+            if (!Array.isArray(datosDetallados) || datosDetallados.length === 0) {
+                Swal.fire({
+                    icon: 'info',
+                    title: 'Sin datos',
+                    text: 'No hay datos detallados para calcular los resúmenes',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+                setMostrarResumenes(!mostrarResumenes);
+                return;
+            }
+
+            // Calcular los resúmenes con los datos detallados
+            const { resumenRecaudacionArray, resumenTipoCreditoArray } = calcularResumenes(datosDetallados);
+            setResumenRecaudacion(resumenRecaudacionArray);
+            setResumenTipoCredito(resumenTipoCreditoArray);
+            setMostrarResumenes(!mostrarResumenes);
+
+        } catch (error) {
+            console.error('Error al obtener datos para resúmenes:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'No se pudieron cargar los resúmenes'
+            });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+
 
     // Función para obtener asociados con filtros
     const obtenerAsociados = useCallback(async () => {
@@ -360,249 +591,527 @@ const TablaResumenCastigos: React.FC = () => {
                 )}
 
                 {!error && (
-                    <>
-                        <div className="border-b border-gray-100 dark:border-white/[0.05] px-5 py-3 flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm text-gray-700 dark:text-gray-400">Mostrar</span>
-                                    <select
-                                        value={itemsPerPage}
-                                        onChange={handleChangeItemsPerPage}
-                                        className="rounded-lg border border-gray-300 bg-transparent px-3 py-1.5 text-sm text-gray-800 shadow-theme-xs focus:border-blue-400 focus:outline-none focus:ring focus:ring-blue-300/10 dark:border-gray-700 dark:bg-white/[0.03] dark:text-white/90 dark:focus:border-blue-800"
-                                    >
-                                        <option value="10">10</option>
-                                        <option value="20">20</option>
-                                        <option value="50">50</option>
-                                        <option value="100">100</option>
-                                    </select>
-                                    <span className="text-sm text-gray-700 dark:text-gray-400">agencias</span>
-                                </div>
-                            </div>
-                            <button
-                                onClick={handleExportarExcelClick}
-                                className="
-                                    inline-flex items-center gap-2
-                                    rounded-lg
-                                    border border-green-600
-                                    bg-green-100
-                                    px-3.5 py-2
-                                    text-sm font-medium
-                                    text-green-700
-                                    shadow-theme-xs
-                                    hover:bg-green-300 hover:text-green-800
-                                    dark:border-green-500
-                                    dark:bg-green-900/20
-                                    dark:text-green-400
-                                    dark:hover:bg-green-900/40
-                                    dark:hover:text-green-300
-                                "
+                    <AnimatePresence mode="wait">
+                        {/* ===================== VISTA LISTADO ===================== */}
+                        {!mostrarResumenes && (
+                            <motion.div
+                                key="listado"
+                                variants={fadeSlide}
+                                initial="initial"
+                                animate="animate"
+                                exit="exit"
+                                transition={{ duration: 0.3 }}
                             >
-                                <svg
-                                    className="h-4 w-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth="2"
-                                        d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                                    />
-                                </svg>
-                                Exportar Excel
-                            </button>
-                        </div>
-
-                        {/* Tablas */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 px-5 py-4">
-                            {/* Columna izquierda - Tabla de Agencias */}
-                            <div className="lg:col-span-1">
-                                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                                    <div className="bg-gray-50 dark:bg-gray-900 px-1 py-1 border-b border-gray-200 dark:border-gray-700">
-                                        <h3 className="text-xl font-medium text-dark text-center dark:text-white">
-                                            Agencias
-                                        </h3>
+                                {/* ===================== TOOLBAR ===================== */}
+                                <div className="border-b border-gray-100 dark:border-white/[0.05] px-5 py-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm text-gray-700 dark:text-gray-400">Mostrar</span>
+                                            <select
+                                                value={itemsPerPage}
+                                                onChange={handleChangeItemsPerPage}
+                                                className="rounded-lg border border-gray-300 bg-transparent px-3 py-1.5 text-sm text-gray-800 shadow-theme-xs focus:border-blue-400 focus:outline-none focus:ring focus:ring-blue-300/10 dark:border-gray-700 dark:bg-white/[0.03] dark:text-white/90 dark:focus:border-blue-800"
+                                            >
+                                                <option value="10">10</option>
+                                                <option value="20">20</option>
+                                                <option value="50">50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                            <span className="text-sm text-gray-700 dark:text-gray-400">agencias</span>
+                                        </div>
                                     </div>
-                                    <div className="max-w-full overflow-x-auto">
-                                        <div className="min-w-full">
-                                            <Table>
-                                                <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
-                                                    <TableRow>
-                                                        <TableCell isHeader className="px-4 py-3 text-lg font-medium text-dark dark:text-white/90">
-                                                            Agencia
-                                                        </TableCell>
-                                                        <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white/90">
-                                                            Cuentas
-                                                        </TableCell>
-                                                        <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white/90">
-                                                            Valor Total
-                                                        </TableCell>
-                                                        <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white/90">
-                                                            Acciones
-                                                        </TableCell>
-                                                    </TableRow>
-                                                </TableHeader>
 
-                                                <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
-                                                    {currentItems.map((asociado, index) => (
-                                                        <TableRow key={`${asociado.CODIGO_AGENCIA}-${index}`}>
-                                                            <TableCell className="px-4 py-3 align-middle">
-                                                                <div>
-                                                                    <div className="text-md text-dark dark:text-gray-300 whitespace-nowrap">
-                                                                        {asociado.CODIGO_AGENCIA} - {asociado.NOMBRE_AGENCIA}
-                                                                    </div>
-                                                                </div>
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={handleVerMasClick}
+                                            className="inline-flex items-center gap-2 rounded-lg border border-blue-600 bg-blue-100 px-4 py-2.5 text-sm font-medium text-blue-700 shadow-theme-xs transition-colors hover:bg-blue-200 hover:text-blue-800 dark:border-blue-500 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40"
+                                        >
+                                            <svg
+                                                className="h-4 w-4"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth="2"
+                                                    d="M12 4v16m8-8H4"
+                                                />
+                                            </svg>
+                                            Ver Más
+                                        </button>
+
+                                        <button
+                                            onClick={handleExportarExcelClick}
+                                            className="inline-flex items-center gap-2 rounded-lg border border-green-600 bg-green-100 px-3.5 py-2 text-sm font-medium text-green-700 shadow-theme-xs hover:bg-green-300 hover:text-green-800 dark:border-green-500 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/40 dark:hover:text-green-300"
+                                        >
+                                            <svg
+                                                className="h-4 w-4"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth="2"
+                                                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                                                />
+                                            </svg>
+                                            Exportar Excel
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* ===================== TABLAS ===================== */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 px-5 py-4">
+                                    {/* Columna izquierda - Tabla de Agencias */}
+                                    <div className="lg:col-span-1">
+                                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                            <div className="bg-gray-50 dark:bg-gray-900 px-1 py-1 border-b border-gray-200 dark:border-gray-700">
+                                                <h3 className="text-xl font-medium text-dark text-center dark:text-white">
+                                                    Agencias
+                                                </h3>
+                                            </div>
+                                            <div className="max-w-full overflow-x-auto">
+                                                <div className="min-w-full">
+                                                    <Table>
+                                                        <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
+                                                            <TableRow>
+                                                                <TableCell isHeader className="px-4 py-3 text-lg font-medium text-dark dark:text-white/90">
+                                                                    Agencia
+                                                                </TableCell>
+                                                                <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white/90">
+                                                                    Cuentas
+                                                                </TableCell>
+                                                                <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white/90">
+                                                                    Valor Total
+                                                                </TableCell>
+                                                                <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white/90">
+                                                                    Acciones
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        </TableHeader>
+
+                                                        <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
+                                                            {currentItems.map((asociado, index) => (
+                                                                <TableRow key={`${asociado.CODIGO_AGENCIA}-${index}`}>
+                                                                    <TableCell className="px-4 py-3 align-middle">
+                                                                        <div>
+                                                                            <div className="text-md text-dark dark:text-gray-300 whitespace-nowrap">
+                                                                                {asociado.CODIGO_AGENCIA} - {asociado.NOMBRE_AGENCIA}
+                                                                            </div>
+                                                                        </div>
+                                                                    </TableCell>
+
+                                                                    <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300 align-middle text-center">
+                                                                        {Number(asociado.TOTAL_CUENTAS).toLocaleString('es-CO')}
+                                                                    </TableCell>
+
+                                                                    <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300 align-middle text-center">
+                                                                        $ {Number(asociado.TOTAL_DEUDA).toLocaleString('es-CO')}
+                                                                    </TableCell>
+
+                                                                    <TableCell className="px-4 py-3 align-middle text-center">
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                setAgenciaSeleccionada(asociado.CODIGO_AGENCIA);
+                                                                                setModalDetalleOpen(true);
+                                                                            }}
+                                                                            className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-1.5 text-gray-700 hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-300"
+                                                                            title="Ver detalle"
+                                                                        >
+                                                                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                            </svg>
+                                                                        </button>
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            ))}
+                                                        </TableBody>
+                                                    </Table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Columna derecha - Tabla de Totales por Zona */}
+                                    <div className="lg:col-span-1">
+                                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                            <div className="bg-gray-50 dark:bg-gray-900 px-1 py-1 border-b border-gray-200 dark:border-gray-700">
+                                                <h3 className="text-xl font-medium text-dark text-center dark:text-white">
+                                                    Resumen por Zonas Jurídicas
+                                                </h3>
+                                            </div>
+                                            <div className="max-w-full overflow-x-auto">
+                                                <div className="min-w-full">
+                                                    <Table>
+                                                        <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
+                                                            <TableRow>
+                                                                <TableCell isHeader className="px-4 py-3 text-lg font-medium text-dark dark:text-white">
+                                                                    Zona Jurídica
+                                                                </TableCell>
+                                                                <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white">
+                                                                    Cuentas
+                                                                </TableCell>
+                                                                <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white">
+                                                                    Valor Total
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        </TableHeader>
+
+                                                        <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
+                                                            <TableRow>
+                                                                <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
+                                                                    JURIDICO ZONA NORTE
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                    {totales.norte.cuentas.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                    $ {totales.norte.valor.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                            <TableRow>
+                                                                <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
+                                                                    JURIDICO ZONA CENTRO
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                    {totales.centro.cuentas.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                    $ {totales.centro.valor.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                            <TableRow>
+                                                                <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
+                                                                    JURIDICO ZONA SUR
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                    {totales.sur.cuentas.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                    $ {totales.sur.valor.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                            <TableRow className="bg-blue-50 dark:bg-blue-900/20">
+                                                                <TableCell className="px-4 py-3 text-md font-semibold text-dark dark:text-white">
+                                                                    TOTAL GENERAL
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center font-semibold text-dark dark:text-white">
+                                                                    {totales.total.cuentas.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center font-semibold text-dark dark:text-white">
+                                                                    $ {totales.total.valor.toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        </TableBody>
+                                                    </Table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Footer con paginación */}
+                                {resultadosFiltrados > 0 && (
+                                    <div className="border-t border-gray-100 dark:border-white/[0.05] px-5 py-4">
+                                        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                                            <div className="text-sm text-gray-500 dark:text-gray-400">
+                                                Mostrando {inicio} - {fin} de {resultadosFiltrados} agencias
+                                                {filtros.filtroRecaudacion || filtros.aniosSeleccionados.length > 0 ? ' (filtradas)' : ''}
+                                            </div>
+
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                                                    disabled={currentPage === 1}
+                                                    className="px-4 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
+                                    hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
+                                    dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
+                                                >
+                                                    ← Anterior
+                                                </button>
+
+                                                <span className="text-sm text-gray-700 dark:text-gray-400">
+                                                    Página {currentPage} de {totalPages || 1}
+                                                </span>
+
+                                                <button
+                                                    onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+                                                    disabled={currentPage === totalPages}
+                                                    className="px-4 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
+                                    hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
+                                    dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
+                                                >
+                                                    Siguiente →
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </motion.div>
+                        )}
+
+                        {/* ===================== VISTA RESÚMENES ===================== */}
+                        {mostrarResumenes && (
+                            <motion.div
+                                key="resumenes"
+                                variants={fadeSlide}
+                                initial="initial"
+                                animate="animate"
+                                exit="exit"
+                                transition={{ duration: 0.3 }}
+                                className="px-5 py-6"
+                            >
+                                {/* BOTÓN VOLVER */}
+                                <div className="mb-6">
+                                    <button
+                                        onClick={() => setMostrarResumenes(false)}
+                                        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                                    >
+                                        ← Sección Anterior
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {/* Resumen por Tipo de Recaudación */}
+                                    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                        <div className="bg-gray-50 dark:bg-gray-900 px-1 py-1 border-b border-gray-200 dark:border-gray-700">
+                                            <div className="flex justify-between items-center">
+                                                <h3 className="text-xl font-medium text-dark text-center dark:text-white">
+                                                    Resumen por Tipo de Recaudación
+                                                </h3>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-gray-700 dark:text-gray-400">Mostrar</span>
+                                                    <select
+                                                        value={resumenRecaudacionPerPage}
+                                                        onChange={(e) => setResumenRecaudacionPerPage(Number(e.target.value))}
+                                                        className="rounded-lg border border-gray-300 bg-transparent px-3 py-1.5 text-sm text-gray-800"
+                                                    >
+                                                        <option value="5">5</option>
+                                                        <option value="10">10</option>
+                                                        <option value="20">20</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="max-w-full overflow-x-auto">
+                                            <div className="min-w-full">
+                                                <Table>
+                                                    <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
+                                                        <TableRow>
+                                                            <TableCell isHeader className="px-4 py-3 text-lg font-medium text-dark dark:text-white">
+                                                                Tipo de Recaudación
                                                             </TableCell>
-
-                                                            <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300 align-middle text-center">
-                                                                {Number(asociado.TOTAL_CUENTAS).toLocaleString('es-CO')}
+                                                            <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white">
+                                                                Cuentas
                                                             </TableCell>
-
-                                                            <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300 align-middle text-center">
-                                                                $ {Number(asociado.TOTAL_DEUDA).toLocaleString('es-CO')}
-                                                            </TableCell>
-
-                                                            <TableCell className="px-4 py-3 align-middle text-center">
-                                                                <button
-                                                                    onClick={() => {
-                                                                        setAgenciaSeleccionada(asociado.CODIGO_AGENCIA);
-                                                                        setModalDetalleOpen(true);
-                                                                    }}
-                                                                    className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white p-1.5 text-gray-700 hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-300"
-                                                                    title="Ver detalle"
-                                                                >
-                                                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                                    </svg>
-                                                                </button>
+                                                            <TableCell isHeader className="px-4 py-3 text-lg font-medium text-right text-dark dark:text-white">
+                                                                Valor
                                                             </TableCell>
                                                         </TableRow>
-                                                    ))}
-                                                </TableBody>
-                                            </Table>
+                                                    </TableHeader>
+
+                                                    <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
+                                                        {resumenRecaudacion
+                                                            .slice(
+                                                                (resumenRecaudacionPage - 1) * resumenRecaudacionPerPage,
+                                                                resumenRecaudacionPage * resumenRecaudacionPerPage
+                                                            )
+                                                            .map((item, index) => (
+                                                                <TableRow key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                                                    <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
+                                                                        {item.tipo}
+                                                                    </TableCell>
+                                                                    <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                        {item.cantidad.toLocaleString('es-CO')}
+                                                                    </TableCell>
+                                                                    <TableCell className="px-4 py-3 text-md text-right text-dark dark:text-gray-300">
+                                                                        $ {item.suma.toLocaleString('es-CO')}
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            ))}
+
+                                                        {/* Fila TOTAL */}
+                                                        <TableRow className="bg-orange-50 dark:bg-orange-900/20">
+                                                            <TableCell className="px-4 py-3 text-md font-semibold text-dark dark:text-white">
+                                                                TOTAL
+                                                            </TableCell>
+                                                            <TableCell className="px-4 py-3 text-md text-center font-semibold text-dark dark:text-white">
+                                                                {resumenRecaudacion.reduce((sum, item) => sum + item.cantidad, 0).toLocaleString('es-CO')}
+                                                            </TableCell>
+                                                            <TableCell className="px-4 py-3 text-md text-right font-semibold text-dark dark:text-white">
+                                                                $ {resumenRecaudacion.reduce((sum, item) => sum + item.suma, 0).toLocaleString('es-CO')}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                            </div>
 
-                            {/* Columna derecha - Tabla de Totales por Zona */}
-                            <div className="lg:col-span-1">
-                                <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                                    <div className="bg-gray-50 dark:bg-gray-900 px-1 py-1 border-b border-gray-200 dark:border-gray-700">
-                                        <h3 className="text-xl font-medium text-dark text-center dark:text-white">
-                                            Resumen por Zonas Jurídicas
-                                        </h3>
-                                    </div>
-                                    <div className="max-w-full overflow-x-auto">
-                                        <div className="min-w-full">
-                                            <Table>
-                                                <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
-                                                    <TableRow>
-                                                        <TableCell isHeader className="px-4 py-3 text-lg font-medium text-dark dark:text-white">
-                                                            Zona Jurídica
-                                                        </TableCell>
-                                                        <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white">
-                                                            Cuentas
-                                                        </TableCell>
-                                                        <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white">
-                                                            Valor Total
-                                                        </TableCell>
-                                                    </TableRow>
-                                                </TableHeader>
+                                        {/* Paginación Resumen Recaudación */}
+                                        {Math.ceil(resumenRecaudacion.length / resumenRecaudacionPerPage) > 1 && (
+                                            <div className="border-t border-gray-100 dark:border-white/[0.05] px-4 py-3">
+                                                <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+                                                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                                                        Mostrando {Math.min((resumenRecaudacionPage - 1) * resumenRecaudacionPerPage + 1, resumenRecaudacion.length)} -
+                                                        {Math.min(resumenRecaudacionPage * resumenRecaudacionPerPage, resumenRecaudacion.length)} de {resumenRecaudacion.length} tipos
+                                                    </div>
 
-                                                <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
-                                                    <TableRow>
-                                                        <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
-                                                            JURIDICO ZONA NORTE
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
-                                                            {totales.norte.cuentas.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
-                                                            $ {totales.norte.valor.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                    <TableRow>
-                                                        <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
-                                                            JURIDICO ZONA CENTRO
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
-                                                            {totales.centro.cuentas.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
-                                                            $ {totales.centro.valor.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                    <TableRow>
-                                                        <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
-                                                            JURIDICO ZONA SUR
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
-                                                            {totales.sur.cuentas.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
-                                                            $ {totales.sur.valor.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                    <TableRow className="bg-blue-50 dark:bg-blue-900/20">
-                                                        <TableCell className="px-4 py-3 text-md font-semibold text-dark dark:text-white">
-                                                            TOTAL GENERAL
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center font-semibold text-dark dark:text-white">
-                                                            {totales.total.cuentas.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                        <TableCell className="px-4 py-3 text-md text-center font-semibold text-dark dark:text-white">
-                                                            $ {totales.total.valor.toLocaleString('es-CO')}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                </TableBody>
-                                            </Table>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => setResumenRecaudacionPage(p => Math.max(p - 1, 1))}
+                                                            disabled={resumenRecaudacionPage === 1}
+                                                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
+                                    hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
+                                    dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
+                                                        >
+                                                            ←
+                                                        </button>
+
+                                                        <span className="text-sm text-gray-700 dark:text-gray-400 px-2">
+                                                            Página {resumenRecaudacionPage} de {Math.ceil(resumenRecaudacion.length / resumenRecaudacionPerPage)}
+                                                        </span>
+
+                                                        <button
+                                                            onClick={() => setResumenRecaudacionPage(p => Math.min(p + 1, Math.ceil(resumenRecaudacion.length / resumenRecaudacionPerPage)))}
+                                                            disabled={resumenRecaudacionPage === Math.ceil(resumenRecaudacion.length / resumenRecaudacionPerPage)}
+                                                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
+                                    hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
+                                    dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
+                                                        >
+                                                            →
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Resumen por Tipo de Crédito */}
+                                    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                        <div className="bg-gray-50 dark:bg-gray-900 px-1 py-1 border-b border-gray-200 dark:border-gray-700">
+                                            <div className="flex justify-between items-center">
+                                                <h3 className="text-xl font-medium text-dark text-center dark:text-white">
+                                                    Resumen por Tipo de Crédito
+                                                </h3>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-gray-700 dark:text-gray-400">Mostrar</span>
+                                                    <select
+                                                        value={resumenTipoCreditoPerPage}
+                                                        onChange={(e) => setResumenTipoCreditoPerPage(Number(e.target.value))}
+                                                        className="rounded-lg border border-gray-300 bg-transparent px-3 py-1.5 text-sm text-gray-800"
+                                                    >
+                                                        <option value="5">5</option>
+                                                        <option value="10">10</option>
+                                                        <option value="20">20</option>
+                                                    </select>
+                                                </div>
+                                            </div>
                                         </div>
+
+                                        <div className="max-w-full overflow-x-auto">
+                                            <div className="min-w-full">
+                                                <Table>
+                                                    <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
+                                                        <TableRow>
+                                                            <TableCell isHeader className="px-4 py-3 text-lg font-medium text-dark dark:text-white">
+                                                                Tipo de Crédito
+                                                            </TableCell>
+                                                            <TableCell isHeader className="px-4 py-3 text-lg font-medium text-center text-dark dark:text-white">
+                                                                Cuentas
+                                                            </TableCell>
+                                                            <TableCell isHeader className="px-4 py-3 text-lg font-medium text-right text-dark dark:text-white">
+                                                                Valor Total
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    </TableHeader>
+
+                                                    <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
+                                                        {resumenTipoCredito
+                                                            .slice(
+                                                                (resumenTipoCreditoPage - 1) * resumenTipoCreditoPerPage,
+                                                                resumenTipoCreditoPage * resumenTipoCreditoPerPage
+                                                            )
+                                                            .map((item, index) => (
+                                                                <TableRow key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                                                    <TableCell className="px-4 py-3 text-md text-dark dark:text-gray-300">
+                                                                        {item.tipo}
+                                                                    </TableCell>
+                                                                    <TableCell className="px-4 py-3 text-md text-center text-dark dark:text-gray-300">
+                                                                        {item.cantidad.toLocaleString('es-CO')}
+                                                                    </TableCell>
+                                                                    <TableCell className="px-4 py-3 text-md text-right text-dark dark:text-gray-300">
+                                                                        $ {item.suma.toLocaleString('es-CO')}
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            ))}
+
+                                                        {/* Fila TOTAL (solo si hay datos) */}
+                                                        {resumenTipoCredito.length > 0 && (
+                                                            <TableRow className="bg-orange-50 dark:bg-orange-900/20">
+                                                                <TableCell className="px-4 py-3 text-md font-semibold text-dark dark:text-white">
+                                                                    TOTAL
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-center font-semibold text-dark dark:text-white">
+                                                                    {resumenTipoCredito.reduce((sum, item) => sum + item.cantidad, 0).toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                                <TableCell className="px-4 py-3 text-md text-right font-semibold text-dark dark:text-white">
+                                                                    $ {resumenTipoCredito.reduce((sum, item) => sum + item.suma, 0).toLocaleString('es-CO')}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        )}
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
+                                        </div>
+
+                                        {/* Paginación Resumen Tipo Crédito */}
+                                        {Math.ceil(resumenTipoCredito.length / resumenTipoCreditoPerPage) > 1 && (
+                                            <div className="border-t border-gray-100 dark:border-white/[0.05] px-4 py-3">
+                                                <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+                                                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                                                        Mostrando {Math.min((resumenTipoCreditoPage - 1) * resumenTipoCreditoPerPage + 1, resumenTipoCredito.length)} -
+                                                        {Math.min(resumenTipoCreditoPage * resumenTipoCreditoPerPage, resumenTipoCredito.length)} de {resumenTipoCredito.length} tipos
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => setResumenTipoCreditoPage(p => Math.max(p - 1, 1))}
+                                                            disabled={resumenTipoCreditoPage === 1}
+                                                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
+                                    hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
+                                    dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
+                                                        >
+                                                            ←
+                                                        </button>
+
+                                                        <span className="text-sm text-gray-700 dark:text-gray-400 px-2">
+                                                            Página {resumenTipoCreditoPage} de {Math.ceil(resumenTipoCredito.length / resumenTipoCreditoPerPage)}
+                                                        </span>
+
+                                                        <button
+                                                            onClick={() => setResumenTipoCreditoPage(p => Math.min(p + 1, Math.ceil(resumenTipoCredito.length / resumenTipoCreditoPerPage)))}
+                                                            disabled={resumenTipoCreditoPage === Math.ceil(resumenTipoCredito.length / resumenTipoCreditoPerPage)}
+                                                            className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
+                                    hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
+                                    dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
+                                                        >
+                                                            →
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* Footer con paginación */}
-                        {resultadosFiltrados > 0 && (
-                            <div className="border-t border-gray-100 dark:border-white/[0.05] px-5 py-4">
-                                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                                        Mostrando {inicio} - {fin} de {resultadosFiltrados} agencias
-                                        {filtros.filtroRecaudacion || filtros.aniosSeleccionados.length > 0 ? ' (filtradas)' : ''}
-                                    </div>
-
-                                    <div className="flex items-center gap-3">
-                                        <button
-                                            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                                            disabled={currentPage === 1}
-                                            className="px-4 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
-                                            hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
-                                            dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
-                                        >
-                                            ← Anterior
-                                        </button>
-
-                                        <span className="text-sm text-gray-700 dark:text-gray-400">
-                                            Página {currentPage} de {totalPages || 1}
-                                        </span>
-
-                                        <button
-                                            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                                            disabled={currentPage === totalPages}
-                                            className="px-4 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-700 
-                                            hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed
-                                            dark:border-gray-700 dark:bg-white/[0.05] dark:text-gray-200 dark:hover:bg-white/[0.1]"
-                                        >
-                                            Siguiente →
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                            </motion.div>
                         )}
-                    </>
+                    </AnimatePresence>
                 )}
             </div>
 
@@ -611,7 +1120,7 @@ const TablaResumenCastigos: React.FC = () => {
                 isOpen={modalDetalleOpen}
                 onClose={() => setModalDetalleOpen(false)}
                 codigoAgencia={agenciaSeleccionada || ''}
-                filtroRecaudacion={filtros.filtroRecaudacion as any}
+                filtroRecaudacion={filtros.filtroRecaudacion}
                 aniosSeleccionados={filtros.aniosSeleccionados}
             />
         </>

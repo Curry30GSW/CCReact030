@@ -21,6 +21,7 @@ export interface Castigado {
   TELS03: string;
   Score: string;
   FechaInsercion: string;
+  CREDITOS_AGRUPADOS?: string | null;
 }
 
 export interface Agencia {

@@ -26,7 +26,7 @@
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "flatpickr": "^4.6.13",
-    "framer-motion": "^12.25.0",
+    "framer-motion": "^12.31.0",
     "react": "^18.3.1",
     "react-apexcharts": "^1.7.0",
     "react-dnd": "^16.0.1",

@@ -7,6 +7,7 @@ import {
   TableIcon,
 } from "../icons";
 import { useSidebar } from "../context/SidebarContext";
+import coopserpLogo from '/images/logo/coopserp.png';
 
 type NavItem = {
   name: string;
@@ -19,7 +20,7 @@ const navItems: NavItem[] = [
   {
     icon: <TableIcon />,
     name: "Cartera Castigada",
-    path: "/",
+    path: "/castigados",
   },
   {
     icon: <CalenderIcon />,
@@ -214,7 +215,7 @@ const AppSidebar: React.FC = () => {
             <>
               <div className="relative">
                 <img
-                  src="/images/logo/coopserp.png"
+                  src={coopserpLogo}
                   alt="Logo Coopserp"
                   className="w-[250px] h-auto"
                 />
@@ -234,7 +235,7 @@ const AppSidebar: React.FC = () => {
           ) : (
             <div className="relative">
               <img
-                src="/images/logo/coopserp.png"
+                src={coopserpLogo}
                 alt="Logo"
                 className="w-12 h-12"
               />

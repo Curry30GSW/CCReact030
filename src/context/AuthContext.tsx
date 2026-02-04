@@ -1,5 +1,6 @@
 // AuthContext.tsx
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { fetchAndBearer } from "../components/api/FetchAndBearer";
 
 type AuthContextType = {
     authenticated: boolean;
@@ -19,7 +20,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const checkSession = useCallback(async () => {
         try {
-            const res = await fetch('http://localhost:5000/api/auth/me', {
+            const res = await fetchAndBearer('/auth/me', {
                 credentials: 'include'
             });
 
@@ -50,7 +51,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setUser(null);
 
 
-            await fetch('http://localhost:5000/api/logout', {
+            await fetchAndBearer('/logout', {
                 method: 'POST',
                 credentials: 'include'
             });

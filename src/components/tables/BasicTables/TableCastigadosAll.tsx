@@ -80,6 +80,8 @@ const TablaCastigados: React.FC = () => {
 
             const respuesta = await res.json();
             const datos = respuesta.data || respuesta;
+            console.log(datos);
+
 
             if (!Array.isArray(datos) || datos.length === 0) {
                 setError('No se encontraron registros');
@@ -327,14 +329,19 @@ const TablaCastigados: React.FC = () => {
         setTodasAgenciasSeleccionadas(false);
     };
 
-
     //Exportar a Excel
     const handleExportarExcel = async () => {
         try {
             const datosParaExcel = datosFiltradosOrdenados.map((asociado) => {
+
                 const valor =
                     (Number(asociado.ESCR93) || 0) +
                     (Number(asociado.ORCR93) || 0);
+
+                // IMPORTANTE: Manejar el caso cuando CREDITOS_AGRUPADOS es null
+                const creditosAgrupados = asociado.CREDITOS_AGRUPADOS === null
+                    ? ''
+                    : (asociado.CREDITOS_AGRUPADOS || '');
 
                 return {
                     agencia: `${asociado.AAUX93} - ${asociado.DESC03}`,
@@ -348,7 +355,8 @@ const TablaCastigados: React.FC = () => {
                     fecha: formatFechaFTAG05(asociado.FTAG05),
                     agenciaCodigo: Number(asociado.AAUX93) || 0,
                     depe93: Number(asociado.DEPE93) || 0,
-                    zonaJuridica: ''
+                    zonaJuridica: '',
+                    CREDITOS_AGRUPADOS: creditosAgrupados // Aquí ya no será null
                 };
             });
 
@@ -363,8 +371,6 @@ const TablaCastigados: React.FC = () => {
             alert('Error al exportar el Excel');
         }
     };
-
-
 
     // Formatear fecha FTAG05
     const formatFechaFTAG05 = (ftag05: number) => {

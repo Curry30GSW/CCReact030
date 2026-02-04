@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import Swal from "sweetalert2";
 import { useAuth } from "../../context/AuthContext"
+import { useNavigate } from "react-router";
 
 export default function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,6 +17,9 @@ export default function UserDropdown() {
   function closeDropdown() {
     setIsOpen(false);
   }
+
+  const navigate = useNavigate();
+
 
   const handleLogout = async () => {
     closeDropdown();
@@ -44,7 +48,7 @@ export default function UserDropdown() {
 
     try {
       await logout();
-      window.location.href = '/auth';
+      navigate('/auth');
     } catch (error) {
       console.error('Error al cerrar sesión:', error);
       Swal.fire({

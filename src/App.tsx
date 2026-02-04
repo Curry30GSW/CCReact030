@@ -32,7 +32,7 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <Router>
+      <Router basename="/CarteraCastigada">
         <ScrollToTop />
         <AppContent />
       </Router>
